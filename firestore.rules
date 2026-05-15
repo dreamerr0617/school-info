@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+match /databases/{database}/documents {
+// 앱 전용 경로에 대한 규칙 설정
+match /artifacts/{appId}/public/data/all_reviews/{reviewId} {
+// 익명 인증을 포함하여 로그인된 사용자만 읽기 및 쓰기 허용
+allow read, write: if request.auth != null;
+}
+
+// 기본적으로 다른 모든 접근은 차단하여 데이터 보호
+match /{document=**} {
+  allow read, write: if false;
+}
+
+
+}
+}

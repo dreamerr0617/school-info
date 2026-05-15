@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>우리학교 급식 대시보드 V5.2 (통합 랭킹)</title>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    <style>
+        :root { --primary: #4A90E2; --bg: #F5F7FA; --card: #ffffff; --gold: #FFD700; --rose: #FF4D4D; --gray: #ddd; }
+        body { font-family: 'Pretendard', -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .app { width: 100%; max-width: 480px; }
+        
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: white; padding: 15px; border-radius: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .nav-btn { background: #f0f2f5; border: none; font-size: 1.2rem; cursor: pointer; padding: 8px 15px; border-radius: 12px; transition: 0.2s; color: #2d3748; }
+        .nav-btn:hover { background: #e2e8f0; }
+        .nav-btn:disabled { opacity: 0.15; color: #cbd5e1; cursor: not-allowed; pointer-events: none; }
+
+        .meal-tabs { display: flex; gap: 10px; margin-bottom: 15px; }
+        .tab-btn { flex: 1; padding: 12px; border: none; border-radius: 15px; background: #e2e8f0; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .tab-btn.active { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(74,144,226,0.3); }
+
+        .tools { display: flex; gap: 8px; margin-bottom: 20px; }
+        .tool-btn { flex: 1; padding: 12px; border: none; border-radius: 15px; background: var(--card); font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.05); font-size: 0.9rem; transition: 0.2s; }
+
+        .meal-card { background: var(--card); border-radius: 24px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); margin-bottom: 15px; min-height: 200px; }
+        .menu-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid #f8f9fa; }
+        .menu-name { font-size: 1rem; color: #333; font-weight: 500; }
+        .star-box { display: flex; gap: 5px; font-size: 1.5rem; color: var(--gray); }
+        .star-box span { cursor: pointer; padding: 2px; }
+        .star-box span.active { color: var(--gold); }
+        .star-box.locked span { cursor: default; pointer-events: none; }
+
+        .main-submit-btn { width: 100%; padding: 18px; border: none; border-radius: 20px; background: var(--primary); color: white; font-weight: 800; cursor: pointer; font-size: 1.1rem; box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3); transition: 0.3s; }
+        .main-submit-btn:disabled { background: #cbd5e1 !important; cursor: not-allowed; box-shadow: none; pointer-events: none; }
+
+        #error-msg { color: var(--rose); font-size: 0.85rem; text-align: center; margin-bottom: 10px; font-weight: bold; display: none; }
+
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1000; justify-content: center; align-items: center; backdrop-filter: blur(4px); }
+        .modal-content { background: white; padding: 25px; border-radius: 30px; width: 90%; max-width: 350px; position: relative; max-height: 80vh; overflow-y: auto; }
+        
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 15px; }
+        .cal-day-wrapper { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 50px; }
+        .cal-day { width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 50%; font-size: 0.9rem; font-weight: 600; transition: 0.2s; }
+        .today-text { font-size: 0.6rem; font-weight: 800; color: var(--rose); margin-top: 1px; }
+        
+        .cal-day.today { border: 2px solid var(--rose); color: var(--rose); }
+        .cal-day.selected { background: var(--primary) !important; color: white !important; border: 2px solid var(--primary); }
+        .cal-day.disabled { opacity: 0.2; cursor: not-allowed; pointer-events: none; }
+
+        .rank-card { padding: 12px; border-radius: 12px; margin-bottom: 8px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
+        .rank-title { font-weight: 800; font-size: 1rem; margin-bottom: 12px; display: block; }
+        .rank-count { font-size: 0.7rem; color: #718096; margin-left: 5px; font-weight: normal; }
+
+        #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 12px 24px; border-radius: 50px; font-size: 0.9rem; z-index: 2000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+
+<div class="app">
+    <header>
+        <button id="prev-btn" class="nav-btn" onclick="changeDate(-1)">◀</button>
+        <div id="current-date-display" style="font-size: 1.1rem; font-weight: 800; color: #2d3748;">오늘의 식단</div>
+        <button id="next-btn" class="nav-btn" onclick="changeDate(1)">▶</button>
+    </header>
+
+    <div class="meal-tabs">
+        <button id="tab-lunch" class="tab-btn active" onclick="setMealType(2)">중식</button>
+        <button id="tab-dinner" class="tab-btn" onclick="setMealType(3)">석식</button>
+    </div>
+
+    <div class="tools">
+        <button class="tool-btn" onclick="openModal('calendar')">📅 전체 달력</button>
+        <button class="tool-btn" onclick="openModal('rank')">🏆 통합 랭킹</button>
+    </div>
+
+    <div class="meal-card">
+        <div id="menu-list">데이터를 불러오는 중...</div>
+    </div>
+
+    <div id="error-msg">⚠️ 모든 메뉴의 별점을 선택해주세요!</div>
+    <button id="final-submit-btn" class="main-submit-btn" onclick="submitAllReviews()">리뷰 완료 및 제출</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- 랭킹 모달 -->
+<div id="modal-rank" class="modal" onclick="closeModal(event)">
+    <div class="modal-content">
+        <h3 style="margin-top:0; text-align:center;">📊 전교생 명예의 전당</h3>
+        <p style="font-size: 0.75rem; text-align: center; color: #666; margin-bottom: 15px;">전체 사용자의 참여로 실시간 계산됩니다.</p>
+        <div id="rank-best-list"></div>
+        <div id="rank-worst-list" style="margin-top:20px"></div>
+        <button class="tool-btn" style="width:100%; margin-top:20px; background:#f0f2f5" onclick="closeModal(null, true)">닫기</button>
+    </div>
+</div>
+
+<!-- 달력 모달 -->
+<div id="modal-calendar" class="modal" onclick="closeModal(event)">
+    <div class="modal-content">
+        <h3 id="cal-month-title" style="margin-top:0; text-align:center;"></h3>
+        <div class="calendar-grid" id="calendar-body"></div>
+        <button class="tool-btn" style="width:100%; margin-top:20px; background:#f0f2f5" onclick="closeModal(null, true)">닫기</button>
+    </div>
+</div>
+
+<script>
+    // Firebase 설정
+    const firebaseConfig = JSON.parse(__firebase_config);
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'school-meal-app';
+
+    // 전역 상태
+    const realToday = new Date(); realToday.setHours(0,0,0,0);
+    let viewDate = new Date(realToday); 
+    let mealType = 2;
+    let tempRatings = {}; 
+    let currentUser = null;
+
+    // 기기 ID 생성/로드
+    function getDeviceId() {
+        let id = localStorage.getItem('deviceId');
+        if(!id) {
+            id = 'dev_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('deviceId', id);
+        }
+        return id;
+    }
+    const deviceId = getDeviceId();
+
+    // 앱 초기화
+    async function init() {
+        // 익명 로그인 실행 (Firestore 접근용)
+        try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await auth.signInWithCustomToken(__initial_auth_token);
+            } else {
+                await auth.signInAnonymously();
+            }
+            currentUser = auth.currentUser;
+        } catch (e) {
+            console.error("인증 실패", e);
+        }
+        
+        updateUI();
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.innerText = msg;
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 2500);
+    }
+
+    // 화면 업데이트
+    async function updateUI() {
+        const isToday = viewDate.getTime() === realToday.getTime();
+        document.getElementById('prev-btn').disabled = isToday;
+
+        const lastDayOfMonth = new Date(realToday.getFullYear(), realToday.getMonth() + 1, 0);
+        document.getElementById('next-btn').disabled = viewDate.getTime() >= lastDayOfMonth.getTime();
+        
+        const ymd = formatDate(viewDate);
+        document.getElementById('current-date-display').innerText = viewDate.toLocaleDateString('ko-KR', {month:'long', day:'numeric', weekday:'short'});
+        
+        const menuList = document.getElementById('menu-list');
+        const submitBtn = document.getElementById('final-submit-btn');
+        const errorMsg = document.getElementById('error-msg');
+        
+        tempRatings = {};
+        errorMsg.style.display = 'none';
+
+        // 해당 날짜/식단 제출 여부 확인 (기기 로컬 저장소 우선 활용)
+        const submits = JSON.parse(localStorage.getItem('submittedDays') || '{}');
+        const isLocked = submits[`${deviceId}_${ymd}_${mealType}`];
+        const isFuture = viewDate > realToday;
+
+        try {
+            const res = await fetch(`https://open.neis.go.kr/hub/mealServiceDietInfo?Type=json&ATPT_OFCDC_SC_CODE=B10&SD_SCHUL_CODE=7010151&MLSV_YMD=${ymd}&MMEAL_SC_CODE=${mealType}`);
+            const data = await res.json();
+            
+            if(data.mealServiceDietInfo) {
+                const rawItems = data.mealServiceDietInfo[1].row[0].DDISH_NM.split("<br/>");
+                const cleanMenus = rawItems.map(item => item.replace(/\([^)]*\)/g, "").replace(/[*]/g, "").trim()).filter(n => n !== "");
+
+                menuList.innerHTML = cleanMenus.map((name, idx) => {
+                    let score = 0;
+                    if(isLocked) {
+                        // 이미 제출했다면 로컬에서 점수 표시 (UI용)
+                        const saved = JSON.parse(localStorage.getItem('myLocalReviews') || '{}');
+                        score = saved[`${ymd}_${mealType}_${name}`] || 0;
+                    }
+                    return `
+                    <div class="menu-row">
+                        <span class="menu-name">${name}</span>
+                        <div class="star-box ${isLocked || isFuture ? 'locked' : ''}" id="star-row-${idx}">
+                            ${[1, 2, 3].map(s => `<span onclick="selectStar('${name.replace(/'/g, "\\'")}', ${s}, ${idx})" class="${s <= score ? 'active' : ''}">★</span>`).join("")}
+                        </div>
+                    </div>`;
+                }).join("");
+
+                if(isLocked) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerText = "제출이 완료되었습니다";
+                } else if(!isToday) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerText = isFuture ? "리뷰는 당일에만 가능합니다" : "지난 리뷰는 작성할 수 없습니다";
+                } else {
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = "리뷰 완료 및 제출";
+                }
+            } else {
+                menuList.innerHTML = `<div style="text-align:center; padding:40px 0; color:#999;">식단 정보가 없습니다.</div>`;
+                submitBtn.disabled = true;
+                submitBtn.innerText = "식단 없음";
+            }
+        } catch(e) { 
+            menuList.innerHTML = "데이터를 불러올 수 없습니다."; 
+        }
+    }
+
+    function selectStar(name, score, idx) {
+        if(viewDate.getTime() !== realToday.getTime()) return;
+        const ymd = formatDate(viewDate);
+        const submits = JSON.parse(localStorage.getItem('submittedDays') || '{}');
+        if(submits[`${deviceId}_${ymd}_${mealType}`]) return;
+
+        tempRatings[name] = score;
+        const stars = document.querySelectorAll(`#star-row-${idx} span`);
+        stars.forEach((s, i) => s.classList.toggle('active', i < score));
+        document.getElementById('error-msg').style.display = 'none';
+    }
+
+    // 리뷰 제출 (클라우드 저장소 활용)
+    async function submitAllReviews() {
+        if (!currentUser) {
+            showToast("인증 중입니다. 잠시만 기다려주세요.");
+            return;
+        }
+
+        const menuRows = document.querySelectorAll('.menu-row');
+        if(Object.keys(tempRatings).length < menuRows.length) {
+            document.getElementById('error-msg').style.display = 'block';
+            return;
+        }
+
+        const ymd = formatDate(viewDate);
+        
+        try {
+            const batch = db.batch();
+            const publicCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('all_reviews');
+            
+            // 각 메뉴별로 통합 데이터베이스에 리뷰 추가
+            for(let name in tempRatings) {
+                const docId = `${ymd}_${mealType}_${deviceId}_${name.replace(/[\/]/g, '_')}`;
+                const docRef = publicCollection.doc(docId);
+                batch.set(docRef, {
+                    food: name,
+                    score: tempRatings[name],
+                    date: ymd,
+                    mealType: mealType,
+                    uid: currentUser.uid,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            await batch.commit();
+
+            // 로컬 저장소 업데이트 (중복 방지용)
+            let submits = JSON.parse(localStorage.getItem('submittedDays') || '{}');
+            submits[`${deviceId}_${ymd}_${mealType}`] = true;
+            localStorage.setItem('submittedDays', JSON.stringify(submits));
+
+            // 내가 매긴 점수 로컬 백업 (UI 표시용)
+            let myLocal = JSON.parse(localStorage.getItem('myLocalReviews') || '{}');
+            for(let name in tempRatings) {
+                myLocal[`${ymd}_${mealType}_${name}`] = tempRatings[name];
+            }
+            localStorage.setItem('myLocalReviews', JSON.stringify(myLocal));
+
+            showToast("리뷰가 전교생 서버에 등록되었습니다!");
+            updateUI();
+        } catch (e) {
+            console.error("제출 실패", e);
+            showToast("제출 중 오류가 발생했습니다.");
+        }
+    }
+
+    // 통합 랭킹 산출 로직
+    async function renderRankings() {
+        const bestList = document.getElementById('rank-best-list');
+        const worstList = document.getElementById('rank-worst-list');
+        
+        bestList.innerHTML = "<p style='text-align:center; padding:20px; font-size:0.8rem;'>전체 통계 계산 중...</p>";
+        worstList.innerHTML = "";
+
+        try {
+            // 이번 달 데이터만 가져오기 위해 간단한 필터링 (클라이언트 메모리에서 수행)
+            const currentMonthPrefix = formatDate(viewDate).substring(0, 6);
+            const querySnapshot = await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('all_reviews').get();
+            
+            let stats = {};
+            querySnapshot.forEach(doc => {
+                const data = doc.data();
+                // 이번 달 데이터만 집계
+                if (data.date && data.date.startsWith(currentMonthPrefix)) {
+                    if(!stats[data.food]) stats[data.food] = { total: 0, count: 0 };
+                    stats[data.food].total += data.score;
+                    stats[data.food].count += 1;
+                }
+            });
+
+            let sorted = Object.keys(stats).map(n => ({
+                name: n, 
+                avg: parseFloat((stats[n].total / stats[n].count).toFixed(1)),
+                count: stats[n].count
+            })).sort((a,b) => b.avg - a.avg || b.count - a.count);
+
+            // Best 랭킹 표시
+            bestList.innerHTML = "<span class='rank-title'>Best Top 3 👑</span>";
+            if(sorted.length > 0) {
+                bestList.innerHTML += sorted.slice(0, 3).map((m, i) => `
+                    <div class="rank-card" style="background:#f0f7ff; border-left: 4px solid #4A90E2;">
+                        <span>${i+1}. ${m.name} <small class="rank-count">(${m.count}명 참여)</small></span> 
+                        <b>⭐${m.avg}</b>
+                    </div>`).join("");
+            } else {
+                bestList.innerHTML += "<p style='font-size:0.8rem; color:#999; text-align:center;'>아직 투표가 없습니다.</p>";
+            }
+
+            // Worst 랭킹 표시
+            worstList.innerHTML = "<span class='rank-title'>Worst Top 3 🤢</span>";
+            if(sorted.length >= 3) {
+                let worstOnes = [...sorted].reverse().slice(0, 3);
+                worstList.innerHTML += worstOnes.map((m, i) => `
+                    <div class="rank-card" style="background:#fff0f0; border-left: 4px solid #FF4D4D;">
+                        <span>${i+1}. ${m.name} <small class="rank-count">(${m.count}명 참여)</small></span> 
+                        <b>⭐${m.avg}</b>
+                    </div>`).join("");
+            } else {
+                 worstList.innerHTML += "<p style='font-size:0.8rem; color:#999; text-align:center;'>데이터가 더 쌓여야 합니다.</p>";
+            }
+
+        } catch (e) {
+            console.error("랭킹 로딩 실패", e);
+            bestList.innerHTML = "<p style='text-align:center; color:red; font-size:0.8rem;'>데이터를 불러오지 못했습니다.</p>";
+        }
+    }
+
+    // 달력 관련
+    function renderCalendar() {
+        const grid = document.getElementById('calendar-body');
+        grid.innerHTML = "";
+        const year = realToday.getFullYear();
+        const month = realToday.getMonth();
+        document.getElementById('cal-month-title').innerText = `${year}년 ${month + 1}월`;
+
+        const firstDay = new Date(year, month, 1).getDay();
+        const lastDate = new Date(year, month + 1, 0).getDate();
+
+        for(let i=0; i<firstDay; i++) grid.innerHTML += `<div></div>`;
+        for(let i=1; i<=lastDate; i++) {
+            const thisDate = new Date(year, month, i);
+            const isToday = thisDate.getTime() === realToday.getTime();
+            const isSelected = thisDate.getTime() === viewDate.getTime();
+            const isPast = thisDate < realToday;
+
+            grid.innerHTML += `
+                <div class="cal-day-wrapper">
+                    <div class="cal-day ${isToday?'today':''} ${isSelected?'selected':''} ${isPast?'disabled':''}" 
+                         onclick="${isPast ? '' : `selectCalendarDate(${i})`}">
+                        ${i}
+                    </div>
+                    ${isToday ? '<span class="today-text">TODAY</span>' : ''}
+                </div>`;
+        }
+    }
+
+    function selectCalendarDate(day) {
+        viewDate = new Date(realToday.getFullYear(), realToday.getMonth(), day);
+        updateUI();
+        closeModal(null, true);
+    }
+
+    function formatDate(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}${m}${d}`;
+    }
+
+    function setMealType(t) {
+        mealType = t;
+        document.getElementById('tab-lunch').classList.toggle('active', t === 2);
+        document.getElementById('tab-dinner').classList.toggle('active', t === 3);
+        updateUI();
+    }
+
+    function changeDate(diff) {
+        const newDate = new Date(viewDate);
+        newDate.setDate(viewDate.getDate() + diff);
+        const lastDayOfMonth = new Date(realToday.getFullYear(), realToday.getMonth() + 1, 0);
+        if(newDate < realToday || newDate > lastDayOfMonth) return;
+        viewDate = newDate;
+        updateUI();
+    }
+
+    function openModal(t) {
+        document.getElementById(`modal-${t}`).style.display = 'flex';
+        if(t === 'rank') renderRankings();
+        if(t === 'calendar') renderCalendar();
+    }
+
+    function closeModal(e, force) {
+        if(force || (e && e.target.classList.contains('modal'))) {
+            document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
